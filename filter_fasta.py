@@ -5,6 +5,8 @@ Filter a FASTA file based on Percolator XML results.
 Applies q-value cutoffs at the PSM and peptide levels, then outputs only
 FASTA entries whose protein sequence contains at least one peptide that
 survived both filters.
+
+Author: Michael Riffle <mriffle@uw.edu>
 """
 
 import argparse
