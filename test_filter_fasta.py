@@ -123,6 +123,34 @@ PERC_XML_WITH_NS = textwrap.dedent("""\
     </percolator_output>
 """)
 
+# Second Percolator XML with different peptides (for multi-XML tests)
+# ANOTHER passes both filters here; EXTRASEQ passes both
+PERC_XML_SECOND = textwrap.dedent("""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <percolator_output>
+      <psms>
+        <psm psm_id="psm1">
+          <q_value>0.001</q_value>
+          <peptide_seq>ANOTHER</peptide_seq>
+        </psm>
+        <psm psm_id="psm2">
+          <q_value>0.001</q_value>
+          <peptide_seq>EXTRASEQ</peptide_seq>
+        </psm>
+      </psms>
+      <peptides>
+        <peptide peptide_id="pep1">
+          <q_value>0.001</q_value>
+          <peptide_seq>ANOTHER</peptide_seq>
+        </peptide>
+        <peptide peptide_id="pep2">
+          <q_value>0.001</q_value>
+          <peptide_seq>EXTRASEQ</peptide_seq>
+        </peptide>
+      </peptides>
+    </percolator_output>
+""")
+
 # Percolator XML with flanking residues and modifications
 PERC_XML_FLANKING = textwrap.dedent("""\
     <?xml version="1.0" encoding="UTF-8"?>
@@ -543,6 +571,84 @@ class TestFullPipeline(unittest.TestCase):
             self.assertEqual(peptides, {"PEPTIDE", "TARGETSEQ"})
 
             filter_fasta(fasta_path, peptides, out_path)
+            with open(out_path) as f:
+                output = f.read()
+
+            headers = [l for l in output.splitlines() if l.startswith(">")]
+            self.assertEqual(len(headers), 2)
+        finally:
+            os.unlink(fasta_path)
+            os.unlink(xml_path)
+            os.unlink(out_path)
+
+    def test_end_to_end_multiple_xml_union(self):
+        """Multiple XML files: passing peptides are unioned across files."""
+        fasta_path = _tmpfile(FASTA_BASIC, suffix=".fasta")
+        xml_path1 = _tmpfile(PERC_XML_NO_NS, suffix=".xml")
+        xml_path2 = _tmpfile(PERC_XML_SECOND, suffix=".xml")
+        out_path = _tmpfile("", suffix=".fasta")
+        try:
+            # XML1 passes: PEPTIDE, TARGETSEQ, NOMATCH (at 0.01)
+            # XML2 passes: ANOTHER, EXTRASEQ
+            # Union: PEPTIDE, TARGETSEQ, NOMATCH, ANOTHER, EXTRASEQ
+            passing = set()
+            passing |= parse_percolator_xml(xml_path1, 0.01, 0.01)
+            passing |= parse_percolator_xml(xml_path2, 0.01, 0.01)
+            self.assertEqual(passing, {"PEPTIDE", "TARGETSEQ", "NOMATCH", "ANOTHER", "EXTRASEQ"})
+
+            filter_fasta(fasta_path, passing, out_path)
+            with open(out_path) as f:
+                output = f.read()
+
+            headers = [l for l in output.splitlines() if l.startswith(">")]
+            # PROT1 has PEPTIDE, PROT2 has TARGETSEQ, PROT4 has ANOTHER
+            # PROT3 has no match, NOMATCH/EXTRASEQ not in any protein
+            self.assertEqual(len(headers), 3)
+            self.assertIn(">sp|P00001|PROT1 Protein one", headers)
+            self.assertIn(">sp|P00002|PROT2 Protein two", headers)
+            self.assertIn(">sp|P00004|PROT4 Protein four", headers)
+            self.assertNotIn(">sp|P00003|PROT3 Protein three", headers)
+        finally:
+            for p in (fasta_path, xml_path1, xml_path2, out_path):
+                os.unlink(p)
+
+    def test_end_to_end_multiple_xml_more_than_single(self):
+        """Multiple XML files should keep >= as many proteins as any single file."""
+        fasta_path = _tmpfile(FASTA_BASIC, suffix=".fasta")
+        xml_path1 = _tmpfile(PERC_XML_NO_NS, suffix=".xml")
+        xml_path2 = _tmpfile(PERC_XML_SECOND, suffix=".xml")
+        out_single = _tmpfile("", suffix=".fasta")
+        out_multi = _tmpfile("", suffix=".fasta")
+        try:
+            pep_single = parse_percolator_xml(xml_path1, 0.01, 0.01)
+            filter_fasta(fasta_path, pep_single, out_single)
+
+            pep_multi = set()
+            pep_multi |= parse_percolator_xml(xml_path1, 0.01, 0.01)
+            pep_multi |= parse_percolator_xml(xml_path2, 0.01, 0.01)
+            filter_fasta(fasta_path, pep_multi, out_multi)
+
+            with open(out_single) as f:
+                single_headers = [l for l in f if l.startswith(">")]
+            with open(out_multi) as f:
+                multi_headers = [l for l in f if l.startswith(">")]
+
+            self.assertGreaterEqual(len(multi_headers), len(single_headers))
+        finally:
+            for p in (fasta_path, xml_path1, xml_path2, out_single, out_multi):
+                os.unlink(p)
+
+    def test_end_to_end_single_xml_still_works(self):
+        """Single XML file still works (backward compatibility)."""
+        fasta_path = _tmpfile(FASTA_BASIC, suffix=".fasta")
+        xml_path = _tmpfile(PERC_XML_NO_NS, suffix=".xml")
+        out_path = _tmpfile("", suffix=".fasta")
+        try:
+            passing = set()
+            passing |= parse_percolator_xml(xml_path, 0.01, 0.01)
+            self.assertEqual(passing, {"PEPTIDE", "TARGETSEQ", "NOMATCH"})
+
+            filter_fasta(fasta_path, passing, out_path)
             with open(out_path) as f:
                 output = f.read()
 

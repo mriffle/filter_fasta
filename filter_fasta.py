@@ -223,8 +223,8 @@ def main():
         help="Input FASTA file"
     )
     parser.add_argument(
-        "-x", "--xml", required=True,
-        help="Percolator results XML file"
+        "-x", "--xml", required=True, nargs="+",
+        help="One or more Percolator results XML files"
     )
     parser.add_argument(
         "-o", "--output", default="-",
@@ -241,7 +241,9 @@ def main():
     args = parser.parse_args()
 
     # Parse Percolator results and apply q-value filters
-    passing_peptides = parse_percolator_xml(args.xml, args.psm_qvalue, args.peptide_qvalue)
+    passing_peptides = set()
+    for xml_file in args.xml:
+        passing_peptides |= parse_percolator_xml(xml_file, args.psm_qvalue, args.peptide_qvalue)
 
     if not passing_peptides:
         print("WARNING: No peptides passed both q-value cutoffs. "
