@@ -51,6 +51,31 @@ def parse_percolator_xml(filepath, psm_qvalue_cutoff, peptide_qvalue_cutoff):
     psm_total = 0
     peptide_total = 0
 
+    def get_peptide_seq(seq_el):
+        """Extract peptide sequence from a peptide_seq element.
+
+        Handles two formats:
+          - Text content: <peptide_seq>PEPTIDE</peptide_seq>
+          - Attribute:    <peptide_seq seq="PEPTIDE" n="K" c="R"/>
+        """
+        if seq_el is None:
+            return None
+        # Try text content first
+        if seq_el.text and seq_el.text.strip():
+            return seq_el.text.strip()
+        # Try 'seq' attribute (with optional n/c flanking attributes)
+        seq = seq_el.get("seq")
+        if seq:
+            n_flank = seq_el.get("n", "")
+            c_flank = seq_el.get("c", "")
+            if n_flank or c_flank:
+                return f"{n_flank}.{seq}.{c_flank}"
+            return seq
+        return None
+
+    # Namespaced attribute key for peptide_id
+    ns_peptide_id = f"{ns_prefix}peptide_id" if ns_prefix else None
+
     for event, elem in ET.iterparse(filepath, events=("end",)):
         if elem.tag == psm_tag:
             psm_total += 1
@@ -58,7 +83,7 @@ def parse_percolator_xml(filepath, psm_qvalue_cutoff, peptide_qvalue_cutoff):
             qval = float(q_el.text) if q_el is not None and q_el.text else None
             if qval is not None and qval <= psm_qvalue_cutoff:
                 seq_el = elem.find(peptide_seq_tag)
-                seq = seq_el.text if seq_el is not None else None
+                seq = get_peptide_seq(seq_el)
                 if seq:
                     # Strip flanking residues if present (e.g., K.PEPTIDE.R -> PEPTIDE)
                     seq = strip_flanking(seq)
@@ -71,8 +96,10 @@ def parse_percolator_xml(filepath, psm_qvalue_cutoff, peptide_qvalue_cutoff):
             qval = float(q_el.text) if q_el is not None and q_el.text else None
             if qval is not None and qval <= peptide_qvalue_cutoff:
                 pep_id = elem.get("peptide_id") or ""
+                if not pep_id and ns_peptide_id:
+                    pep_id = elem.get(ns_peptide_id) or ""
                 seq_el = elem.find(peptide_seq_tag)
-                seq = (seq_el.text if seq_el is not None else None) or pep_id
+                seq = get_peptide_seq(seq_el) or pep_id
                 if seq:
                     seq = strip_flanking(seq)
                     peptide_passing.add(seq)

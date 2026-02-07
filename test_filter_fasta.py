@@ -151,6 +151,43 @@ PERC_XML_SECOND = textwrap.dedent("""\
     </percolator_output>
 """)
 
+# Real-world Percolator XML: seq/n/c attributes on peptide_seq, namespaced psm_id/peptide_id
+PERC_XML_REAL_WORLD = textwrap.dedent("""\
+    <?xml version="1.0" encoding="UTF-8"?>
+    <percolator_output
+    xmlns="http://per-colator.com/percolator_out/15"
+    xmlns:p="http://per-colator.com/percolator_out/15">
+      <psms>
+        <psm p:psm_id="psm_001">
+          <q_value>2.600277e-02</q_value>
+          <peptide_seq n="R" c="G" seq="GSGGGSSGGSIGGR"/>
+        </psm>
+        <psm p:psm_id="psm_002">
+          <q_value>0.001</q_value>
+          <peptide_seq n="K" c="R" seq="PEPTIDE"/>
+        </psm>
+        <psm p:psm_id="psm_003">
+          <q_value>0.001</q_value>
+          <peptide_seq seq="NOFLANKING"/>
+        </psm>
+      </psms>
+      <peptides>
+        <peptide p:peptide_id="pep_001">
+          <q_value>0.01</q_value>
+          <peptide_seq n="R" c="G" seq="GSGGGSSGGSIGGR"/>
+        </peptide>
+        <peptide p:peptide_id="pep_002">
+          <q_value>0.001</q_value>
+          <peptide_seq n="K" c="R" seq="PEPTIDE"/>
+        </peptide>
+        <peptide p:peptide_id="pep_003">
+          <q_value>0.001</q_value>
+          <peptide_seq seq="NOFLANKING"/>
+        </peptide>
+      </peptides>
+    </percolator_output>
+""")
+
 # Percolator XML with flanking residues and modifications
 PERC_XML_FLANKING = textwrap.dedent("""\
     <?xml version="1.0" encoding="UTF-8"?>
@@ -402,6 +439,77 @@ class TestParsePercolatorXml(unittest.TestCase):
         try:
             result = parse_percolator_xml(path, 0.01, 0.01)
             self.assertEqual(result, {"PEPTIDE", "TARGETSEQ"})
+        finally:
+            os.unlink(path)
+
+    def test_real_world_seq_attributes(self):
+        """Real-world format: peptide_seq uses seq/n/c attributes, not text."""
+        path = _tmpfile(PERC_XML_REAL_WORLD, suffix=".xml")
+        try:
+            result = parse_percolator_xml(path, 0.05, 0.05)
+            # All three PSMs pass at 0.05; all three peptides pass at 0.05
+            # Flanking n/c should be stripped: R.GSGGGSSGGSIGGR.G -> GSGGGSSGGSIGGR
+            # K.PEPTIDE.R -> PEPTIDE, NOFLANKING -> NOFLANKING
+            self.assertIn("GSGGGSSGGSIGGR", result)
+            self.assertIn("PEPTIDE", result)
+            self.assertIn("NOFLANKING", result)
+            self.assertEqual(len(result), 3)
+        finally:
+            os.unlink(path)
+
+    def test_real_world_strict_cutoff(self):
+        """Real-world format with strict cutoff filters out high q-value PSMs."""
+        path = _tmpfile(PERC_XML_REAL_WORLD, suffix=".xml")
+        try:
+            result = parse_percolator_xml(path, 0.01, 0.01)
+            # PSM psm_001 has q=0.026 -> fails at 0.01
+            # PSM psm_002 has q=0.001 -> passes
+            # PSM psm_003 has q=0.001 -> passes
+            # Peptide pep_001 has q=0.01 -> passes (<=)
+            # Peptide pep_002 has q=0.001 -> passes
+            # Peptide pep_003 has q=0.001 -> passes
+            # Intersection: PEPTIDE, NOFLANKING (GSGGGSSGGSIGGR fails PSM)
+            self.assertIn("PEPTIDE", result)
+            self.assertIn("NOFLANKING", result)
+            self.assertNotIn("GSGGGSSGGSIGGR", result)
+            self.assertEqual(len(result), 2)
+        finally:
+            os.unlink(path)
+
+    def test_peptide_id_fallback_with_modifications(self):
+        """Peptide entries with no peptide_seq element use peptide_id as sequence."""
+        xml = textwrap.dedent("""\
+            <?xml version="1.0" encoding="UTF-8"?>
+            <percolator_output
+            xmlns="http://per-colator.com/percolator_out/15"
+            xmlns:p="http://per-colator.com/percolator_out/15">
+              <psms>
+                <psm p:psm_id="psm1">
+                  <q_value>0.001</q_value>
+                  <peptide_seq n="R" c="G" seq="SSCVGSSMPGGGMGGMGGMGGMPMM"/>
+                </psm>
+                <psm p:psm_id="psm2">
+                  <q_value>0.001</q_value>
+                  <peptide_seq n="K" c="R" seq="IVLTLIAPLLKPLFK"/>
+                </psm>
+              </psms>
+              <peptides>
+                <peptide p:peptide_id="SSCVGSSM[15.9949]PGGGMGGMGGM[15.9949]GGMPMM">
+                  <q_value>0.001</q_value>
+                </peptide>
+                <peptide p:peptide_id="IVLTLIAPLLKPLFK">
+                  <q_value>0.001</q_value>
+                </peptide>
+              </peptides>
+            </percolator_output>
+        """)
+        path = _tmpfile(xml, suffix=".xml")
+        try:
+            result = parse_percolator_xml(path, 0.01, 0.01)
+            # Modifications stripped from peptide_id: SSCVGSSMPGGGMGGMGGMGGMPMM
+            self.assertIn("SSCVGSSMPGGGMGGMGGMGGMPMM", result)
+            self.assertIn("IVLTLIAPLLKPLFK", result)
+            self.assertEqual(len(result), 2)
         finally:
             os.unlink(path)
 
