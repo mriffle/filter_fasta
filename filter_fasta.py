@@ -11,6 +11,7 @@ Author: Michael Riffle <mriffle@uw.edu>
 
 import argparse
 from collections import deque
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
@@ -108,12 +109,16 @@ def parse_percolator_xml(filepath, psm_qvalue_cutoff, peptide_qvalue_cutoff):
     # Peptides must pass BOTH filters
     passing = psm_passing_peptides & peptide_passing
 
-    print(f"Percolator summary:", file=sys.stderr)
-    print(f"  PSMs total:                {psm_total}", file=sys.stderr)
-    print(f"  PSMs passing (q<={psm_qvalue_cutoff}):   {len(psm_passing_peptides)} unique peptides", file=sys.stderr)
-    print(f"  Peptides total:            {peptide_total}", file=sys.stderr)
-    print(f"  Peptides passing (q<={peptide_qvalue_cutoff}): {len(peptide_passing)}", file=sys.stderr)
-    print(f"  Peptides passing both:     {len(passing)}", file=sys.stderr)
+    psm_label = f"PSMs passing (q<={psm_qvalue_cutoff})"
+    pep_label = f"Peptides passing (q<={peptide_qvalue_cutoff})"
+    col = max(len(psm_label), len(pep_label), 25) + 2
+
+    print(f"Percolator summary ({os.path.basename(filepath)}):", file=sys.stderr)
+    print(f"  {'PSMs total':<{col}} {psm_total}", file=sys.stderr)
+    print(f"  {psm_label:<{col}} {len(psm_passing_peptides)} unique peptides", file=sys.stderr)
+    print(f"  {'Peptides total':<{col}} {peptide_total}", file=sys.stderr)
+    print(f"  {pep_label:<{col}} {len(peptide_passing)}", file=sys.stderr)
+    print(f"  {'Peptides passing both':<{col}} {len(passing)}", file=sys.stderr)
 
     return passing
 
